@@ -1,0 +1,250 @@
+
+#!/usr/bin/env python3
+"""
+ROVIK
+GitHub Repository Automation Tool
+
+A professional command-line application for creating
+GitHub repositories through the official GitHub REST API.
+
+Requirements:
+    Python 3.10+
+    A GitHub Personal Access Token
+
+Environment:
+    GITHUB_TOKEN=your_github_token
+"""
+
+import os
+import sys
+import json
+import argparse
+import urllib.request
+import urllib.error
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+API_URL = "https://api.github.com"
+
+
+@dataclass
+class RepositoryConfig:
+    name: str
+    description: str = ""
+    private: bool = False
+    gitignore: Optional[str] = None
+    license: Optional[str] = None
+    organization: Optional[str] = None
+
+
+class GitHubAPIError(Exception):
+    """Custom exception for GitHub API errors."""
+
+
+class GitHubRepositoryManager:
+
+    def __init__(self, token: str):
+        if not token:
+            raise ValueError("GitHub token is required.")
+
+        self.token = token
+
+    def _request(self, endpoint: str, payload: dict) -> dict:
+        """Send an authenticated request to GitHub."""
+
+        url = f"{API_URL}{endpoint}"
+
+        data = json.dumps(payload).encode("utf-8")
+
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+                "User-Agent": "Rovik-Repository-Manager"
+            },
+            method="POST"
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        except urllib.error.HTTPError as error:
+            try:
+                details = json.loads(
+                    error.read().decode("utf-8")
+                )
+                message = details.get("message", str(error))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                message = str(error)
+
+            raise GitHubAPIError(
+                f"GitHub API Error ({error.code}): {message}"
+            ) from error
+
+        except urllib.error.URLError as error:
+            raise GitHubAPIError(
+                f"Connection failed: {error.reason}"
+            ) from error
+
+    def create_repository(
+        self,
+        config: RepositoryConfig
+    ) -> dict:
+        """Create a new GitHub repository."""
+
+        payload = {
+            "name": config.name,
+            "description": config.description,
+            "private": config.private,
+            "auto_init": True,
+            "has_issues": True,
+            "has_projects": True,
+            "has_wiki": False,
+        }
+
+        if config.gitignore:
+            payload["gitignore_template"] = config.gitignore
+
+        if config.license:
+            payload["license_template"] = config.license
+
+        if config.organization:
+            endpoint = f"/orgs/{config.organization}/repos"
+        else:
+            endpoint = "/user/repos"
+
+        return self._request(endpoint, payload)
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        prog="rovik",
+        description="Create GitHub repositories with Rovik."
+    )
+
+    parser.add_argument(
+        "--name",
+        required=True,
+        help="Repository name."
+    )
+
+    parser.add_argument(
+        "--description",
+        default="",
+        help="Repository description."
+    )
+
+    parser.add_argument(
+        "--private",
+        action="store_true",
+        help="Create a private repository."
+    )
+
+    parser.add_argument(
+        "--gitignore",
+        default=None,
+        help="GitHub gitignore template, e.g. Python."
+    )
+
+    parser.add_argument(
+        "--license",
+        default=None,
+        help="License template, e.g. mit."
+    )
+
+    parser.add_argument(
+        "--org",
+        default=None,
+        help="Create the repository under an organization."
+    )
+
+    return parser.parse_args()
+
+
+def display_success(repository: dict):
+    print("\n" + "=" * 55)
+    print("             ROVIK - SUCCESS")
+    print("=" * 55)
+
+    print(f"Repository : {repository['full_name']}")
+    print(f"Visibility : {'Private' if repository['private'] else 'Public'}")
+    print(f"URL        : {repository['html_url']}")
+    print(f"Clone URL  : {repository['clone_url']}")
+    print(f"Branch     : {repository.get('default_branch', 'main')}")
+
+    print("=" * 55)
+    print("Your GitHub repository is ready.")
+    print("=" * 55 + "\n")
+
+
+def main():
+
+    print("""
+    ____   ___  _   _ ___ _  __
+   |  _ \\ / _ \\| | | |_ _| |/ /
+   | |_) | | | | | | || || ' /
+   |  _ <| |_| | |_| || || . \\
+   |_| \\_\\\\___/ \\___/|___|_|\\_\\
+
+       GitHub Repository Manager
+    """)
+
+    args = parse_arguments()
+
+    token = os.getenv("GITHUB_TOKEN")
+
+    if not token:
+        print(
+            "[ERROR] GITHUB_TOKEN environment variable is missing."
+        )
+        print(
+            "Please configure your GitHub access token first."
+        )
+        sys.exit(1)
+
+    config = RepositoryConfig(
+        name=args.name,
+        description=args.description,
+        private=args.private,
+        gitignore=args.gitignore,
+        license=args.license,
+        organization=args.org
+    )
+
+    manager = GitHubRepositoryManager(token)
+
+    try:
+        print(f"\n[INFO] Creating repository: {config.name}")
+        print("[INFO] Connecting to GitHub API...")
+
+        repository = manager.create_repository(config)
+
+        display_success(repository)
+
+    except GitHubAPIError as error:
+        print(f"\n[ERROR] {error}")
+        sys.exit(1)
+
+    except ValueError as error:
+        print(f"\n[ERROR] {error}")
+        sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n[INFO] Operation cancelled.")
+        sys.exit(130)
+
+
+if __name__ == "__main__":
+    main()
+
+$env:GITHUB_TOKEN="YOUR_GITHUB_TOKEN".
+python rovik.py --name my-first-project --description "Created with Rovik" --gitignore Python --license mit
+
+python rovik.py --name private-project --private
